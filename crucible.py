@@ -120,9 +120,14 @@ def run(args) -> int:
     cfg = load_config(args.config)
     repo, repo_name, fallback = resolve_repo(cfg, args)
     if repo is None:
-        print(f"ERROR: no repo in config matches {repo_name!r}", file=sys.stderr)
-        print(f"  configured: {[r.name for r in cfg.repos]}", file=sys.stderr)
-        return 2
+        if args.dry_run:  # local feedback
+            print(f"ERROR: no repo in config matches {repo_name!r}", file=sys.stderr)
+            print(f"  configured: {[r.name for r in cfg.repos]}", file=sys.stderr)
+            return 2
+        # Posting path: a missing config entry must NOT block a merge (fail-open).
+        log.warning("no repo matches %r; failing open (nothing to review)", repo_name)
+        print(f"\nFAIL-OPEN: no repo in config matches {repo_name!r}; nothing to review, exiting success.")
+        return 0
 
     print_resolution(cfg, repo, repo_name, fallback, args)
     provider_name = args.provider or repo.provider

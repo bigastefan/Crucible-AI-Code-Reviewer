@@ -1,6 +1,7 @@
 # Crucible — Phase 1 Build Plan (The Agent)
 
-**Status:** Awaiting your approval. **No code has been written.**
+**Status:** Phases **0–3 built + unit-tested (88 passing)** and pushed to GitHub. **Phase 5 (this
+update) awaiting your approval before any code.** Phase 4 deferred to Focus-pilot onboarding.
 **Authoritative source:** [CRUCIBLE_AGENT_SPEC.md](docs/CRUCIBLE_AGENT_SPEC.md) (V4, multi-provider).
 **Sequenced by:** [CRUCIBLE_PHASE1_DELIVERY_PLAN.md](docs/CRUCIBLE_PHASE1_DELIVERY_PLAN.md) (3 weekends, gates A/B/C).
 **Tested against:** [CRUCIBLE_DELIVERY_ASSURANCE.md](docs/CRUCIBLE_DELIVERY_ASSURANCE.md) (GP-01–10, T1-01–18).
@@ -84,8 +85,9 @@ Crucible/
 
 | Weekend | Phases | Outcome | Gate |
 |---|---|---|---|
-| **W1 — Engine + Azure posting** | 0, 1, 2, 3 | Real comments + summary on an **Azure** test PR; re-push = zero dupes; forced error doesn't block merge | **A — Foundation** |
-| **W2 — CI + GitHub** | 4, 5 | Azure CI live; GitHub adapter gets the *same* review with no `core/` change (flex per D2) | **B — CI + multi-host** |
+| **W1 — Engine + Azure posting** | 0, 1, 2, 3 | Real comments + summary on an **Azure** test PR; re-push = zero dupes; forced error doesn't block merge | **A — Foundation** ✅ (code) |
+| **W2 — GitHub adapter + Actions** | **5 (now)** | A **GitHub** PR gets the *same* review (anchored comments + summary + dedup + fail-open) with **no `core/` change** | **B — multi-host** |
+| **— Azure CI wiring** | **4 (deferred)** | Pushed to **Focus pilot onboarding** (D2 flex). Doesn't block the GitHub path | (folded into pilot) |
 | **W3 — Hardening + pilot** | 6, 7 | Secret never reaches model; kill switch; calibrated; live on **Focus only**, advisory | **C — Trust** |
 
 Discipline: **one phase at a time.** Each ends with an exact verify command; I stop and wait for
@@ -145,30 +147,107 @@ your "passes" before the next.
 
 ---
 
-# WEEKEND 2 — phases 4–5 (→ Gate B)
+# WEEKEND 2 — Phase 5 now · Phase 4 deferred (→ Gate B)
 
-### Phase 4 — Azure CI wiring
-**Files:** `azure-pipelines-crucible.yml` (checkout `fetchDepth: 0`, install deps, run crucible,
-`env: SYSTEM_ACCESSTOKEN: $(System.AccessToken)`); a README runbook section: the variable group (LLM
-key matching the `model:` string), the **Build Validation** branch policy, and the **Project Build
-Service → Contribute to PRs** permission (without it, posting silently fails).
-- ✅ **Accept:** opening a real Azure PR triggers the pipeline; a review appears within ~2–4 min.
+> **Reorder (your directive):** build **Phase 5 (GitHub adapter + Actions)** now; **defer Phase 4
+> (Azure CI pipeline)** until Focus-pilot onboarding. Per Agent Spec §8.2 + §11. The `GitProvider`
+> abstraction means **no `core/` change** — only `providers/github.py` and the workflow are new.
+> Everything in `core/` (diff parser, dedup marker, poster, reviewer, llm, prompt_builder) is reused
+> byte-for-byte; that reuse *is* the T1-16 host-swap proof.
 
-### Phase 5 — GitHub adapter + Actions runner
-**Files:** `providers/github.py` (second adapter behind the **same** interface);
-`.github/workflows/crucible.yml` (`on: pull_request: [opened, synchronize, reopened]`,
-`permissions: { pull-requests: write, contents: read }`, `GITHUB_TOKEN`). **Reuse all of `core/`
-unchanged.** GitHub inline comments: `POST .../pulls/{n}/comments` with `path`, `line`, `side:RIGHT`,
-`commit_id` (= `head_sha` from PRContext). Summary = a PR review or issue comment. **Same
-`<!-- crucible:{hash} -->` dedup marker.**
-- ✅ **Accept (T1-16/17/18) — Gate B:** a GitHub test PR gets the same review (anchored comments +
-  summary + dedup + fail-open) with **no `core/` change**; GP-02's comment anchors to the exact diff
-  line (GitHub rejects off-diff lines — proves the parser); `GITHUB_TOKEN` posts; a forced error on a
-  *required* GitHub check still lets the PR merge. Flipping a repo's `provider:` changes behaviour,
-  not code.
+### Phase 5 — GitHub adapter + Actions runner  ◀ NOW
+**New files (no `core/` edits):**
 
-> **GATE B:** in CI on Azure; GitHub verified *or* consciously deferred (D2 — it's the flex item).
-> A broken CI trigger is not acceptable; a deferred GitHub adapter is.
+**1. `providers/github.py`** — second adapter implementing the §8 `GitProvider` interface via the
+GitHub REST API (`https://api.github.com`, `Authorization: Bearer $GITHUB_TOKEN`). Methods:
+| Method | GitHub REST |
+|---|---|
+| `get_pr_context()` | Read the event payload at `GITHUB_EVENT_PATH` → `pull_request.{number, title, draft, head.sha, head.ref, base.ref}`; owner/repo from `GITHUB_REPOSITORY`. `head.sha` is the **PR head commit** (NOT `GITHUB_SHA`, which is the merge commit) — required as `commit_id`. CLI fallback: `GET /repos/{o}/{r}/pulls/{n}`. |
+| `get_diff()` | Local `git diff origin/$GITHUB_BASE_REF...HEAD` (workflow checks out `fetch-depth: 0`). Same approach as Azure; only the env var differs. |
+| `existing_finding_hashes()` | `GET /repos/{o}/{r}/pulls/{n}/comments` (paginated) → extract `<!-- crucible:{hash} -->` markers (shared `core/dedup`). |
+| `post_inline(finding)` | `POST /repos/{o}/{r}/pulls/{n}/comments` with `body` (= `core/dedup.render_inline_body`), `path`, `line`, `side: "RIGHT"`, `commit_id`. **GitHub 422s any line not in the diff** — so `core/poster` already filters to `added_line_numbers` (T1-17 hinges on the shared parser being exact). |
+| `upsert_summary(markdown)` | Summary = one **issue comment** (easy to edit in place): find the existing one via `<!-- crucible:summary -->` in `GET /repos/{o}/{r}/issues/{n}/comments`; `PATCH /repos/{o}/{r}/issues/comments/{id}` if present, else `POST /repos/{o}/{r}/issues/{n}/comments`. |
+| `set_status(state, note)` | Optional/cosmetic commit status: `POST /repos/{o}/{r}/statuses/{head_sha}` `state: success\|failure`, `context: "crucible"`. The **gate is the workflow step exit code** (plan A4), not this. |
+
+Plus a one-line factory wire-up in `providers/base.py` `get_provider("github", …)` → `GitHubProvider.from_env(...)`. (That's the *only* edit outside `providers/github.py` + the workflow; `base.py` is the provider layer, not `core/`.)
+
+**2. `.github/workflows/crucible.yml`** — the runner, with the secret-safety rules below baked in:
+```yaml
+name: Crucible review
+on:
+  pull_request:                       # ← NEVER pull_request_target (fork-secret leak vector)
+    types: [opened, synchronize, reopened]
+permissions:                          # ← least privilege, nothing more
+  pull-requests: write
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }      # diff needs origin/<base>
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - name: Run Crucible
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # secret ref only; never inline
+        run: python crucible.py --pr ${{ github.event.pull_request.number }} --repo "${{ github.repository }}"
+```
+*We do **not** check out, install, build, or execute any code from the PR — we only `git diff` and send
+the (redacted) text to the LLM.*
+
+**3. `config.yaml`** — add a `repos:` block whose `match:` equals the test repo's `owner/repo`
+(`provider: github`). No code; this is the §6.3 onboarding step.
+
+#### 🔒 ANTHROPIC_API_KEY safety — NON-NEGOTIABLE (secret-exfiltration prevention)
+1. **Trigger is `on: pull_request`** — never `pull_request_target` (runs with repo secrets in scope on
+   fork PRs = the classic leak vector).
+2. **Key is a repo Actions secret** referenced only as `${{ secrets.ANTHROPIC_API_KEY }}`. Never
+   hard-coded, echoed, printed, logged, written to artifacts, or put in a PR comment. `core/secrets.py`
+   redaction (Phase 6) further scrubs the diff before the LLM call.
+3. **Least-privilege `permissions:`** — `pull-requests: write`, `contents: read`. Nothing else.
+4. **Fork PRs on a public repo get no secret** (key empty) and a read-only token → the agent must
+   **FAIL OPEN**: post "review unavailable" (or, if even that's blocked, swallow it) and exit success.
+   Our existing fail-open wrapper (`crucible.run_post`) + `reviewer` fail-safe already do this; Phase 5
+   adds a test asserting an **empty `ANTHROPIC_API_KEY` → exit 0, no crash**.
+5. **Never execute PR code** with the key in scope — no `npm install`/build/eval of PR scripts. We read
+   the diff only.
+6. **Diff is untrusted** — reviewed as data, never obeyed (injection hardening already in `system.md`).
+7. **Test repo is PRIVATE** (below) — removes the public-fork-secret risk entirely.
+
+#### Test repo (your directive)
+- A **separate, PRIVATE GitHub repo** holds the **Golden PRs GP-01–10** and all adapter testing.
+  **Not** this Crucible source repo — no deliberately-buggy branches land here.
+- Setup (manual, documented in the Phase-5 runbook): create the private repo; commit
+  `.github/workflows/crucible.yml` + a minimal `crucible` install (or `pip install` from this repo);
+  add the **`ANTHROPIC_API_KEY`** Actions secret; add a `repos:` entry matching its `owner/repo`; make
+  the workflow a **required status check** in branch protection.
+- **This source repo:** at most **one smoke-test PR** to confirm the workflow triggers and fails open.
+
+- ✅ **Accept — Gate B (T1-16/17/18):**
+  - **T1-16 (host swap):** a GitHub PR on the private test repo gets the same review — anchored
+    comments + one summary + dedup + fail-open — with **no `core/` change** (verified by `git` showing
+    only `providers/github.py`, the workflow, and `config.yaml`/`base.py` touched).
+  - **T1-17 (GitHub line-anchoring):** GP-02's comment anchors to the exact diff line; an off-diff line
+    is rejected by GitHub (422) — proving the shared parser's right-side numbers are exact.
+  - **T1-18 (auth + fail-open):** `GITHUB_TOKEN` with `pull-requests: write` posts comments; a forced
+    error (empty/bad `ANTHROPIC_API_KEY`) on a *required* check still lets the PR merge (exit 0).
+  - Offline (what I can run here): unit-test `providers/github.py` request-building with a fake HTTP
+    session (URLs, payloads, `side:RIGHT`, pagination, summary PATCH-vs-POST), mirroring
+    `test_azure_adapter.py`; plus an empty-key fail-open test.
+
+> **GATE B (adjusted):** the multi-host proof now runs on **GitHub** (Azure CI is deferred). Pass =
+> a GitHub PR gets the full review with no `core/` change and fails open with no/!bad key.
+
+### Phase 4 — Azure CI pipeline wiring  ◀ DEFERRED to Focus-pilot onboarding
+Pushed out per your directive (and D2's flex). When we onboard the Focus pilot:
+`azure-pipelines-crucible.yml` (checkout `fetchDepth: 0`, install, run crucible,
+`env: SYSTEM_ACCESSTOKEN: $(System.AccessToken)`) + the runbook (variable group with the LLM key, the
+**Build Validation** branch policy, the **Project Build Service → Contribute to PRs** permission).
+The Azure *adapter* (`providers/azure.py`) is already built + unit-tested (Phase 3); only the pipeline
+YAML + permissions remain. Acceptance: opening a real Azure PR triggers the pipeline; review in ~2–4 min.
 
 ---
 

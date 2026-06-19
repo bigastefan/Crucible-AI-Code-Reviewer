@@ -63,5 +63,7 @@ def get_provider(name: str, *, pr_id=None, session=None, **kwargs) -> GitProvide
 
         return AzureProvider.from_env(pr_id=pr_id, session=session)
     if key == "github":
-        raise NotImplementedError("GitHub adapter lands in Phase 5 (providers/github.py)")
+        from providers.github import GitHubProvider
+
+        return GitHubProvider.from_env(pr_id=pr_id, session=session)
     raise ValueError(f"Unknown provider {name!r}; expected 'azure' or 'github'")

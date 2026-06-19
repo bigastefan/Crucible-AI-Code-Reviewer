@@ -34,11 +34,20 @@ repos:
     match: "Focus.Api"
     project_rules: "focus-backend"
     language_rules: ["csharp", "sql"]
-  - name: "Acme Web (GitHub)"
+  # Self-review: Crucible reviews its own PRs on GitHub (the smoke-test repo).
+  - name: "Crucible (self)"
     provider: "github"
-    match: "acme-org/acme-web"
-    project_rules: "acme-web"
-    language_rules: ["typescript"]
+    match: "bigastefan/Crucible-AI-Code-Reviewer"   # == github.repository
+    project_rules: "crucible"
+    language_rules: ["python"]
+
+  # PRIVATE Golden-PR test repo — uncomment + set `match` to its owner/repo once created
+  # (see docs/CRUCIBLE_GITHUB_RUNBOOK.md). Keep deliberately-buggy GP branches OFF the source repo.
+  # - name: "Crucible Test Repo"
+  #   provider: "github"
+  #   match: "bigastefan/<your-private-test-repo>"
+  #   project_rules: "crucible"
+  #   language_rules: ["typescript", "sql"]
 
 # Never review these (generated / vendored / lockfiles).
 exclude_paths:

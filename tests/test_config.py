@@ -36,8 +36,9 @@ def test_match_by_substring_match_key():
 
 def test_match_github_owner_repo():
     cfg = load_config(CONFIG)
-    repo = match_repo(cfg, "acme-org/acme-web")
+    repo = match_repo(cfg, "bigastefan/Crucible-AI-Code-Reviewer")
     assert repo is not None and repo.provider == "github"
+    assert repo.language_rules == ["python"]
 
 
 def test_no_match_returns_none():
