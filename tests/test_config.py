@@ -15,7 +15,7 @@ def test_loads_real_config():
     assert cfg.review.fail_check_on == "none"  # pilot advisory default (D3)
     assert cfg.agent.enabled is True
     assert cfg.agent.on_error == "pass"
-    assert len(cfg.repos) == 3
+    assert len(cfg.repos) == 4
     assert cfg.exclude_paths  # non-empty
 
 

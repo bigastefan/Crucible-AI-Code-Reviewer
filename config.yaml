@@ -41,13 +41,13 @@ repos:
     project_rules: "crucible"
     language_rules: ["python"]
 
-  # PRIVATE Golden-PR test repo — uncomment + set `match` to its owner/repo once created
-  # (see docs/CRUCIBLE_GITHUB_RUNBOOK.md). Keep deliberately-buggy GP branches OFF the source repo.
-  # - name: "Crucible Test Repo"
-  #   provider: "github"
-  #   match: "bigastefan/<your-private-test-repo>"
-  #   project_rules: "crucible"
-  #   language_rules: ["typescript", "sql"]
+  # PRIVATE Golden-PR test repo (deliberately-buggy GP branches live here, NOT the source repo).
+  # See docs/CRUCIBLE_GITHUB_RUNBOOK.md.
+  - name: "Crucible Test Repo"
+    provider: "github"
+    match: "bigastefan/crucible-test-repo"
+    project_rules: "test-repo"
+    language_rules: ["typescript", "sql"]
 
 # Never review these (generated / vendored / lockfiles).
 exclude_paths:
