@@ -145,3 +145,12 @@ def test_summary_reflects_error_note():
     review = ReviewResult(summary="x", overall_risk=OverallRisk.MEDIUM, error="boom")
     md = poster.render_summary(review, [], _cfg().root)
     assert "⚠️" in md and dedup.text_has_summary_marker(md)
+
+
+def test_summary_strips_all_leading_html_comments():
+    # The posted summary must not leak internal template/version comments.
+    review = _review([_finding(2, Severity.LOW, "a")])
+    md = poster.render_summary(review, [], _cfg().root)
+    assert "RENDER TEMPLATE" not in md
+    assert "version:" not in md
+    assert md.lstrip().startswith("###")  # begins at the real heading

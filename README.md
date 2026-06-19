@@ -46,11 +46,22 @@ python crucible.py --pr <id> --repo "<repo in config>" --diff-file tests/fixture
 
 `--dry-run` reviews and prints the findings JSON; it posts nothing.
 
+### Local testing without an API key
+
+For fast offline iteration you can feed a canned model response and a fixture diff — no key,
+no network:
+
+```bash
+# CRUCIBLE_FAKE_LLM returns the file's contents instead of calling a provider
+CRUCIBLE_FAKE_LLM=response.json python crucible.py \
+  --pr 1 --repo "<repo in config>" --diff-file tests/fixtures/modify.diff --dry-run
+```
+
 ## Status
 
-Phase 1 (the agent) — in progress. Engine + Azure adapter + dedup + fail-open are built and
-unit-tested; CI wiring and the GitHub adapter are next. See [`plan.md`](plan.md) and
-[`docs/`](docs/) for the full build plan.
+Phase 1 (the agent) — in progress. Engine, diff parser, dedup, fail-open, the **Azure** adapter
+and the **GitHub** adapter + Actions workflow are built and unit-tested. Azure CI pipeline wiring
+is deferred to pilot onboarding. See [`plan.md`](plan.md) and [`docs/`](docs/) for the full plan.
 
 ## License
 

@@ -142,8 +142,13 @@ def _read_summary_template(root: Path) -> str:
     import re
 
     raw = (root / "prompts" / "summary.md").read_text()
-    # strip leading version header comment (but keep the SUMMARY_MARKER if present)
-    raw = re.sub(r"^\s*<!--\s*version.*?-->\s*", "", raw, count=1, flags=re.DOTALL)
+    # Strip EVERY leading HTML comment (version header + dev notes) so none leak into
+    # the posted summary. Only leading comments are removed (the SUMMARY_MARKER is
+    # appended later by render_summary, not taken from the template).
+    prev = None
+    while prev != raw:
+        prev = raw
+        raw = re.sub(r"^\s*<!--.*?-->\s*", "", raw, count=1, flags=re.DOTALL)
     return raw.strip()
 
 
