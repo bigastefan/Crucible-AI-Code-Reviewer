@@ -1,0 +1,49 @@
+model:
+  # LiteLLM model string — the prefix selects the provider. Swap provider = change
+  # this line + set the matching key in the CI secret store.
+  #   Claude → "anthropic/claude-sonnet-4-6"  (key: ANTHROPIC_API_KEY)
+  #   Gemini → "gemini/gemini-2.5-pro"         (key: GEMINI_API_KEY)
+  #   OpenAI → "openai/gpt-5"                   (key: OPENAI_API_KEY)
+  default: "anthropic/claude-sonnet-4-6"
+  max_tokens: 8000
+
+review:
+  min_severity_to_post: "low"     # low | medium | high | critical
+  fail_check_on: "none"           # PILOT DEFAULT (D3): advisory, NEVER blocks a merge
+  max_diff_lines: 4000            # cost guard — skip + notice if larger
+  max_diff_tokens: 60000          # context-window guard
+  max_findings: 30                # anti-noise cap on inline comments
+
+agent:
+  enabled: true                   # MASTER KILL SWITCH — false = run, post nothing, exit clean
+  on_error: "pass"                # fail-open (recommended) | fail
+  skip_draft_prs: true
+  redact_secrets: true            # redact secrets BEFORE the LLM call; raise as Critical
+
+# Map each repo to its rule set + git host. Onboard a repo = add a block here +
+# create rules/projects/<project_rules>.md. No code change.
+# provider: azure | github
+repos:
+  - name: "Focus Frontend"
+    provider: "azure"
+    match: "Focus.Web"
+    project_rules: "focus-frontend"
+    language_rules: ["typescript", "angular"]
+  - name: "Focus Backend"
+    provider: "azure"
+    match: "Focus.Api"
+    project_rules: "focus-backend"
+    language_rules: ["csharp", "sql"]
+  - name: "Acme Web (GitHub)"
+    provider: "github"
+    match: "acme-org/acme-web"
+    project_rules: "acme-web"
+    language_rules: ["typescript"]
+
+# Never review these (generated / vendored / lockfiles).
+exclude_paths:
+  - "**/*.min.js"
+  - "**/*.generated.cs"
+  - "**/Migrations/**"
+  - "package-lock.json"
+  - "**/dist/**"

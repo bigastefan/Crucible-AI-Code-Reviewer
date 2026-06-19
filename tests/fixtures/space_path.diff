@@ -1,0 +1,7 @@
+diff --git a/with space.py b/with space.py
+index b80e322..86c71ee 100644
+--- a/with space.py	
++++ b/with space.py	
+@@ -1 +1,2 @@
+ print("hi")
++print("added line")

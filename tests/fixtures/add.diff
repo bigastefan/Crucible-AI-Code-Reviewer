@@ -1,0 +1,8 @@
+diff --git a/brand_new.py b/brand_new.py
+new file mode 100644
+index 0000000..c5d726b
+--- /dev/null
++++ b/brand_new.py
+@@ -0,0 +1,2 @@
++def hello():
++    return "world"

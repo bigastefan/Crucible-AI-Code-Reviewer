@@ -1,0 +1,26 @@
+diff --git a/calc.py b/calc.py
+index b7666fb..25097ab 100644
+--- a/calc.py
++++ b/calc.py
+@@ -1,5 +1,5 @@
+ def add(a, b):
+-    return a + b
++    return a + b + 0
+ 
+ 
+ def sub(a, b):
+diff --git a/logo.bin b/logo.bin
+index da533fa..5322073 100644
+Binary files a/logo.bin and b/logo.bin differ
+diff --git a/old_name.py b/renamed2.py
+similarity index 100%
+rename from old_name.py
+rename to renamed2.py
+diff --git a/to_delete.py b/to_delete.py
+deleted file mode 100644
+index 08959c5..0000000
+--- a/to_delete.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-def gone():
+-    return "bye"

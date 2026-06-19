@@ -1,0 +1,14 @@
+diff --git a/to_rename_edit.py b/renamed_edited.py
+similarity index 68%
+rename from to_rename_edit.py
+rename to renamed_edited.py
+index 0198bbd..391950a 100644
+--- a/to_rename_edit.py
++++ b/renamed_edited.py
+@@ -1,5 +1,5 @@
+ def f():
+-    return 1
++    return 100
+ 
+ 
+ def g():

@@ -1,0 +1,8 @@
+diff --git a/to_delete.py b/to_delete.py
+deleted file mode 100644
+index 08959c5..0000000
+--- a/to_delete.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-def gone():
+-    return "bye"

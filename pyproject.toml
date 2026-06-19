@@ -1,0 +1,19 @@
+[project]
+name = "crucible"
+version = "0.1.0"
+description = "Multi-provider AI PR-review agent that runs in CI."
+requires-python = ">=3.11"
+dependencies = [
+    "litellm==1.55.10",
+    "requests==2.32.3",
+    "pyyaml==6.0.2",
+    "unidiff==0.7.5",
+]
+
+[project.scripts]
+crucible = "crucible:main"
+
+[tool.pytest.ini_options]
+# Lets `import core` / `import providers` resolve when running pytest from the repo root.
+pythonpath = ["."]
+testpaths = ["tests"]

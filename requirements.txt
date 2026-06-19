@@ -1,0 +1,10 @@
+# Crucible runtime deps. Versions are PINNED, not floated — litellm had a
+# supply-chain incident, so dependency hygiene is deliberate (Agent Spec §7).
+# Verify/bump these against the live indexes; see CHANGELOG-prompts.md.
+litellm==1.55.10
+requests==2.32.3
+pyyaml==6.0.2
+unidiff==0.7.5
+
+# Dev/test only (not needed to run a review):
+pytest==8.3.4
