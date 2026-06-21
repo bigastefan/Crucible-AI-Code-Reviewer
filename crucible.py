@@ -14,15 +14,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 
-import logging
-
-from core import poster, prompt_builder, reviewer
+from core import engine, logging_setup, poster
 from core.config import Config, ConfigError, RepoConfig, load_config, match_repo
-from core.diff import filter_excluded, parse_diff
 from core.models import OverallRisk, ReviewResult, review_as_dict
 from providers.base import get_provider
 
@@ -99,17 +98,15 @@ def acquire_diff(args, repo: RepoConfig, provider_name: str) -> str | None:
 
 
 def run_engine(cfg: Config, repo: RepoConfig, diff_text: str) -> int:
-    """Phase 2 dry-run: parse → prompt → model → validated findings JSON. No posting."""
-    files = filter_excluded(parse_diff(diff_text), cfg.exclude_paths)
+    """Phase 2 dry-run: redact → guard → review → validated findings JSON. No posting."""
+    t0 = time.time()
+    result, files = engine.run_review(cfg, repo, diff_text)
     commentable = sum(len(f.added_line_numbers) for f in files)
     print(f"\nParsed {len(files)} file(s); {commentable} commentable line(s).")
 
-    system_prompt, user_prompt = prompt_builder.build_prompts(cfg, repo, diff_text)
-    model = cfg.model_for(repo)
-    result = reviewer.review(model, system_prompt, user_prompt, cfg.model.max_tokens)
-
     print("\n--- review (JSON, posts nothing) ---")
     print(json.dumps(review_as_dict(result), indent=2, ensure_ascii=False))
+    logging_setup.log_run(log, cfg.model_for(repo), time.time() - t0, note="(dry-run)")
     if result.error:
         print(f"\nNOTE: fail-open — review unavailable/unparsed ({result.error}). "
               "In CI this would post a 'review unavailable' note and pass the check.")
@@ -118,6 +115,9 @@ def run_engine(cfg: Config, repo: RepoConfig, diff_text: str) -> int:
 
 def run(args) -> int:
     cfg = load_config(args.config)
+    if not cfg.agent.enabled:  # master kill switch
+        print("Crucible is disabled (agent.enabled=false). Nothing reviewed or posted.")
+        return 0
     repo, repo_name, fallback = resolve_repo(cfg, args)
     if repo is None:
         if args.dry_run:  # local feedback
@@ -166,13 +166,16 @@ def run_post(cfg: Config, repo: RepoConfig, provider_name: str, args) -> int:
         return 0
 
     try:
+        ctx = provider.get_pr_context()
+        if cfg.agent.skip_draft_prs and ctx.is_draft:  # draft-PR skip
+            print("\nDraft PR — skipped (agent.skip_draft_prs). Nothing posted.")
+            return 0
+
+        t0 = time.time()
         diff_text = Path(args.diff_file).read_text() if args.diff_file else provider.get_diff()
-        files = filter_excluded(parse_diff(diff_text), cfg.exclude_paths)
-        system_prompt, user_prompt = prompt_builder.build_prompts(cfg, repo, diff_text)
-        result = reviewer.review(
-            cfg.model_for(repo), system_prompt, user_prompt, cfg.model.max_tokens
-        )
+        result, files = engine.run_review(cfg, repo, diff_text)
         outcome = poster.post_review(provider, result, files, cfg)
+        logging_setup.log_run(log, cfg.model_for(repo), time.time() - t0, note=f"(posted={outcome.posted})")
 
         s = outcome.stats
         print(
@@ -202,6 +205,7 @@ def run_post(cfg: Config, repo: RepoConfig, provider_name: str, args) -> int:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    logging_setup.configure()
     try:
         return run(args)
     except ConfigError as e:

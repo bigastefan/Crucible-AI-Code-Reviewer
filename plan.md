@@ -49,7 +49,10 @@ Crucible/
 │   ├── llm.py                    # ★ ONLY file that calls a model — LiteLLM, vendor from config string
 │   ├── reviewer.py               # orchestrate call; validate+coerce JSON to enums; fail-safe on bad JSON
 │   ├── dedup.py                  # finding-hash + <!-- crucible:{hash} --> marker (shared by ALL adapters)
+│   ├── poster.py                 # provider-neutral select→post→summary→gate (Phase 3)
+│   ├── engine.py                 # shared diff→redact→guard→review→merge path (Phase 6)
 │   ├── secrets.py                # secret scan + redaction          (Phase 6)
+│   ├── retry.py                  # transient-error retry/backoff helper (Phase 6)
 │   └── logging_setup.py          # structured logging + per-run cost line (Phase 6)
 │
 ├── providers/                    # === the ONLY code that knows a git host ===
@@ -253,16 +256,75 @@ YAML + permissions remain. Acceptance: opening a real Azure PR triggers the pipe
 
 # WEEKEND 3 — phases 6–7 (→ Gate C)
 
-### Phase 6 — Hardening & safety
-**Files:** `core/secrets.py`, `core/logging_setup.py`; wire into `prompt_builder`/`reviewer`/`crucible.py`.
-- **Secret redaction before the LLM call** (raise hits as **Critical** findings) — see ambiguity A7.
-- `max_diff_tokens` + `max_diff_lines` "too large to auto-review" notice (GP-05, P1-12).
-- **Master kill switch** `agent.enabled: false` → run, post nothing, exit clean (T1-12).
-- **Draft-PR skip** `agent.skip_draft_prs` (T1-13). Retry/backoff on transient LLM/REST errors.
-- Structured logging + a per-run cost line (T1-14, via `litellm.completion_cost`).
-- ✅ **Accept (GP-03/05/06, T1-07/09/12/13):** a planted secret **never appears in the outbound
-  request** (asserted in logs) and is flagged Critical; oversized PR → graceful notice; `enabled:
-  false` posts nothing; draft PR skipped. `pytest tests/test_secret_redaction.py`.
+### Phase 6 — Hardening & safety  ◀ NOW (build in the order below — highest-value first)
+
+> **★ Confirmed: ALL of this lives in `core/`, NOT `providers/`.** Redaction + guards run in the
+> shared review path **before the LLM call**, so they protect **both** the Azure and GitHub adapters
+> with zero adapter changes (host-agnostic, per your directive + X-04). Fail-open is preserved: any
+> redaction/guard error is caught and the run still finishes success.
+>
+> **Wiring point — one shared core path (no duplication).** Today the dry-run pipeline (`run_engine`)
+> and the posting pipeline (`run_post`) each assemble→review separately. Phase 6 factors the common
+> "diff → (redact) → (guard) → review → merge secret findings" into **`core/engine.py` →
+> `run_review(cfg, repo, diff_text, complete_fn=None) -> ReviewResult`**, called by both. This is the
+> single place redaction/guards attach, so both hosts and both run-modes get them. (`core/` only;
+> `crucible.py` just calls it.)
+
+**1. Secret redaction — FIRST (unblocks GP-03).**  `core/secrets.py` (new):
+- A curated regex set (no new dependency, A7): AWS keys (`AKIA…`/secret), PEM `-----BEGIN … PRIVATE
+  KEY-----` blocks, provider tokens (`sk-…`, `ghp_/gho_/ghs_…`, Slack `xox[baprs]-…`), JWTs,
+  connection strings (`Server=…;Password=…`), and `password=/secret=/api_key=/Bearer …` assignments.
+  Patterns listed in the file header for easy tuning; tuned to avoid nuking ordinary code.
+- `mask_secrets(text) -> (masked_text, kinds)` — regex-subs every secret-looking substring in the
+  WHOLE diff with `***REDACTED:<kind>***` (covers added/context/removed lines — defence in depth).
+  **The masked text is what `prompt_builder` receives; the raw secret never reaches `llm.complete`.**
+- `find_secret_findings(files) -> list[Finding]` — scans the PARSED added lines so each hit gets a
+  precise `file:line`, emitted as **severity=critical, category=security** (canonical enums), title
+  "Hardcoded secret detected (<kind>)". **The comment/finding records the KIND + location, NEVER the
+  value.** These deterministic findings are merged into the `ReviewResult` and posted even if the LLM
+  is skipped (size guard) or fails (fail-open).
+- Gated by `agent.redact_secrets`.
+- ✅ **GP-03 / T1-07:** `pytest tests/test_secret_redaction.py` — planted secrets masked (value
+  absent from `masked_text` AND from the assembled `user_prompt`); a Critical/security finding raised
+  at the right line; the value appears in **no** log output.
+
+**2. Size guards (GP-05 / T1-09).** In `core/engine.run_review`, before the LLM call: count changed
+lines and estimate tokens (`core/llm.estimate_tokens` — lazy `litellm.token_counter`, else a
+chars/4 heuristic). If `> max_diff_lines` **or** `> max_diff_tokens` → **skip the LLM**, return a
+`ReviewResult` whose summary is a graceful "PR too large to auto-review (N lines / ~T tokens > limit)"
+notice (still merging any secret findings), exit clean. No crash.
+- ✅ a diff over a small configured limit → notice only, no model call, no crash.
+
+**3. Master kill switch (T1-12).** In `crucible.run()` (very first check): `agent.enabled: false` →
+print "Crucible disabled", post nothing, **exit 0**. Applies to dry-run and posting.
+- ✅ `enabled: false` → runs, posts nothing, exits clean.
+
+**4. Draft-PR skip (T1-13).** In `run_post`, after `provider.get_pr_context()`: if
+`agent.skip_draft_prs and ctx.is_draft` → "draft PR skipped", post nothing, exit 0. Host-agnostic
+(uses `PRContext.is_draft`, already populated by both adapters).
+- ✅ a draft PR → skipped.
+
+**5. Retry/backoff on transient errors.** `core/retry.py` (new): `with_retry(fn, attempts, base_delay,
+transient_predicate, sleep)` (injectable `sleep` so tests don't actually wait). `llm.complete` wraps
+the model call (retry 429/timeouts/5xx, NOT auth errors); `poster` optionally wraps provider REST
+calls via the same core helper — **so retries stay in `core/`, no provider edit.** On exhaustion →
+`LLMError` → fail-open.
+- ✅ a flaky call that succeeds on retry returns normally; a permanent auth error does not retry.
+
+**6. Per-run cost + duration log.** `core/logging_setup.py` (new): configure structured logging
+(level from `CRUCIBLE_LOG_LEVEL`); a per-run line logs model, wall-clock duration, prompt/response
+token estimate, and cost when the provider returns it (`litellm.completion_cost`). **Never logs the
+diff content or any secret.**
+- ✅ each run logs a cost/duration line; the planted-secret test asserts no secret in logs.
+
+**Also (GP-06):** when `filter_excluded` leaves **no** reviewable files, `run_review` short-circuits
+with a "nothing to review" notice (no LLM call).
+
+**Phase acceptance (run before done):** GP-03 (secret redacted + Critical), GP-05 (oversized → notice),
+GP-06 (excluded-only → nothing to review), T1-07/T1-09/T1-12/T1-13; full `pytest tests/` green; then
+**re-run GP-02 and GP-09 live** on the test repo to confirm no regression in review quality or dedup.
+New tests: `tests/test_secret_redaction.py`, `tests/test_size_guard.py`, `tests/test_engine.py`
+(kill-switch/draft-skip/nothing-to-review/merge), `tests/test_retry.py`.
 
 ### Phase 7 — Calibration & pilot (your gate, not a code phase)
 **Deliverable:** a short **rollout runbook**. Then *you* run Crucible on **15–20 historical Focus
