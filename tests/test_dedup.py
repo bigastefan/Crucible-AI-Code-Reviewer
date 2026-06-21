@@ -1,36 +1,52 @@
-"""Phase 3 — dedup hash + marker. The headline property (plan A3): the hash is STABLE
-across line drift, so a re-pushed PR never re-posts an existing finding (GP-09)."""
+"""Phase 3/6 — dedup hash + marker. The hash is keyed on the anchored line's CONTENT
+(not its number, not the LLM title) so re-pushes never re-post (P1-01/GP-09), even when
+the line moves OR the model rewords the title."""
 from core import dedup
 from core.models import Category, Finding, Severity
 
 
-def f(file="a.py", line=10, sev=Severity.HIGH, cat=Category.BUG, title="Null deref", comment="c", sug=None):
-    return Finding(file, line, sev, cat, title, comment, sug)
+def f(file="a.py", line=10, sev=Severity.HIGH, cat=Category.BUG, title="Null deref", comment="c", sug=None, h=None):
+    return Finding(file, line, sev, cat, title, comment, sug, dedup_hash=h)
 
 
-def test_hash_is_stable_across_line_drift():
-    # Same finding, different line (a later commit shifted it) → SAME hash.
-    assert dedup.finding_hash(f(line=10)) == dedup.finding_hash(f(line=87))
+# --- content_hash (the canonical basis) ---------------------------------------
+def test_content_hash_ignores_line_number():
+    # The line number is NOT an input → stable when the line drifts.
+    assert dedup.content_hash("a.py", "bug", "return x.foo()") == dedup.content_hash("a.py", "bug", "return x.foo()")
 
 
-def test_hash_ignores_comment_and_suggestion():
-    assert dedup.finding_hash(f(comment="x", sug="a")) == dedup.finding_hash(f(comment="y", sug="b"))
+def test_content_hash_ignores_whitespace_and_case():
+    assert dedup.content_hash("a.py", "bug", "  return  X.foo() ") == dedup.content_hash("a.py", "bug", "return x.foo()")
 
 
-def test_hash_is_case_and_whitespace_insensitive_on_title():
-    assert dedup.finding_hash(f(title="Null Deref")) == dedup.finding_hash(f(title="  null   deref "))
+def test_content_hash_differs_on_file_category_content():
+    base = dedup.content_hash("a.py", "bug", "return x.foo()")
+    assert dedup.content_hash("b.py", "bug", "return x.foo()") != base
+    assert dedup.content_hash("a.py", "security", "return x.foo()") != base
+    assert dedup.content_hash("a.py", "bug", "return y.bar()") != base
 
 
-def test_hash_differs_on_file_category_title():
-    base = dedup.finding_hash(f())
-    assert dedup.finding_hash(f(file="b.py")) != base
-    assert dedup.finding_hash(f(cat=Category.SECURITY)) != base
-    assert dedup.finding_hash(f(title="Off by one")) != base
+# --- finding_hash prefers the content-based dedup_hash, else falls back to title
+def test_finding_hash_uses_dedup_hash_when_set():
+    assert dedup.finding_hash(f(h="abc123abc123")) == "abc123abc123"
 
 
+def test_finding_hash_title_fallback_when_no_dedup_hash():
+    # Two findings, same file/category, different titles → different fallback hashes.
+    assert dedup.finding_hash(f(title="A")) != dedup.finding_hash(f(title="B"))
+
+
+def test_title_drift_does_not_change_content_hash():
+    # The whole point: same line content, model reworded the title → SAME hash.
+    h1 = dedup.content_hash("a.py", "bug", "return user.name.toUpperCase()")
+    h2 = dedup.content_hash("a.py", "bug", "return user.name.toUpperCase()")
+    assert h1 == h2
+
+
+# --- marker round-trip --------------------------------------------------------
 def test_marker_round_trip():
-    body = dedup.render_inline_body(f())
-    assert dedup.extract_finding_hashes(body) == {dedup.finding_hash(f())}
+    body = dedup.render_inline_body(f(h="deadbeef0001"))
+    assert dedup.extract_finding_hashes(body) == {"deadbeef0001"}
 
 
 def test_summary_marker_not_counted_as_finding_hash():
@@ -43,7 +59,7 @@ def test_render_inline_body_contains_parts():
     body = dedup.render_inline_body(f(sug="if x is not None:"))
     assert "HIGH" in body and "bug" in body and "Null deref" in body
     assert "```suggestion" in body and "if x is not None:" in body
-    assert dedup.SUMMARY_MARKER not in body  # inline comments are not the summary
+    assert dedup.SUMMARY_MARKER not in body
 
 
 def test_extract_handles_multiple_and_empty():

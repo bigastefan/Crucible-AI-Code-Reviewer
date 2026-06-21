@@ -134,6 +134,9 @@ class Finding:
     title: str
     comment: str
     suggestion: Optional[str] = None
+    # Internal dedup key (file|category|anchored-line-content), set by the poster.
+    # Not part of the §10 JSON contract. Stable across line drift AND LLM title drift.
+    dedup_hash: Optional[str] = None
 
 
 @dataclass

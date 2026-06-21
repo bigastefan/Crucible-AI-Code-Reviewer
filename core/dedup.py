@@ -22,12 +22,27 @@ SUMMARY_MARKER = "<!-- crucible:summary -->"
 _MARKER_RE = re.compile(r"<!--\s*crucible:([0-9a-f]{8,40})\s*-->")
 
 
-def _normalize_title(title: str) -> str:
-    return " ".join(str(title).lower().split())
+def _normalize(text: str) -> str:
+    return " ".join(str(text).lower().split())
+
+
+def content_hash(file: str, category: str, line_content: str) -> str:
+    """The canonical dedup hash: file | category | normalized anchored-line CODE.
+
+    Keyed on the changed line's CONTENT (not its number, not the LLM title) so it is
+    stable across both line drift and title rewording between runs — the property that
+    actually prevents duplicate comments on re-push (P1-01/GP-09). Once the dev edits
+    that line, the content (and hash) changes, which is correct: it's a new state."""
+    basis = f"{file}|{category}|{_normalize(line_content)}"
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
 
 def finding_hash(finding: Finding) -> str:
-    basis = f"{finding.file}|{finding.category.value}|{_normalize_title(finding.title)}"
+    """Use the content-based dedup_hash when the poster has set it; otherwise fall back
+    to a title-based hash (kept only so callers without diff context still work)."""
+    if finding.dedup_hash:
+        return finding.dedup_hash
+    basis = f"{finding.file}|{finding.category.value}|{_normalize(finding.title)}"
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
 

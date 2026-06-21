@@ -43,6 +43,17 @@ def _commentable_map(files: List[FileDiff]) -> Dict[str, Set[int]]:
     return {f.path: f.added_line_numbers for f in files if f.added_line_numbers}
 
 
+def _line_content_map(files: List[FileDiff]) -> Dict[tuple, str]:
+    """(file, right_line) → added-line code, for content-based dedup hashing."""
+    out: Dict[tuple, str] = {}
+    for f in files:
+        for h in f.hunks:
+            for ln in h.added_lines:
+                if ln.right_line is not None:
+                    out[(f.path, ln.right_line)] = ln.content
+    return out
+
+
 def resolve_file(file: str, commentable: Dict[str, Set[int]]) -> Optional[str]:
     """Map a finding's file onto a parsed diff path. Exact match first, then a unique
     suffix match (tolerates the model emitting a slightly different path prefix)."""
@@ -68,6 +79,7 @@ def select_findings(
     independent of dedup — a previously-posted critical still gates).
     """
     commentable = _commentable_map(files)
+    content = _line_content_map(files)
     min_rank = Severity(cfg.min_severity_to_post).rank
     stats = SelectionStats(total=len(review.findings))
 
@@ -83,6 +95,8 @@ def select_findings(
             continue
         if path != f.file:
             f = Finding(path, f.line, f.severity, f.category, f.title, f.comment, f.suggestion)
+        # Content-based dedup hash from the anchored line (stable across line/title drift).
+        f.dedup_hash = dedup.content_hash(path, f.category.value, content.get((path, f.line), f.title))
         anchored.append(f)
         candidates.append(f)
 

@@ -75,12 +75,24 @@ def test_severity_filter():
 
 
 def test_dedup_against_existing_hashes():
-    high = _finding(11, Severity.HIGH, "high")
-    low = _finding(2, Severity.LOW, "low")
-    existing = {dedup.finding_hash(high)}
-    to_post, _, stats = poster.select_findings(_review([high, low]), _files(), _cfg().review, existing)
+    review = _review([_finding(11, Severity.HIGH, "high"), _finding(2, Severity.LOW, "low")])
+    # First pass sets the content-based dedup hashes.
+    first, _, _ = poster.select_findings(review, _files(), _cfg().review, set())
+    high_hash = next(f.dedup_hash for f in first if f.title == "high")
+    # Second pass: that finding is already on the PR → dropped.
+    to_post, _, stats = poster.select_findings(review, _files(), _cfg().review, {high_hash})
     assert [f.title for f in to_post] == ["low"]
     assert stats.skipped_existing == 1
+
+
+def test_dedup_holds_when_title_changes():
+    # Same anchored line, model reworded the title → still deduped (the live GP-09 fix).
+    first, _, _ = poster.select_findings(
+        _review([_finding(11, Severity.HIGH, "Null deref")]), _files(), _cfg().review, set())
+    h = first[0].dedup_hash
+    reworded = _review([_finding(11, Severity.HIGH, "Possible null dereference here")])
+    to_post, _, _ = poster.select_findings(reworded, _files(), _cfg().review, {h})
+    assert to_post == []  # title changed, content identical → no duplicate
 
 
 def test_cap_keeps_highest_severity():
