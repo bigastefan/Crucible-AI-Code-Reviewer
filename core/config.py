@@ -46,6 +46,12 @@ class AgentConfig:
 
 
 @dataclass
+class BrandingConfig:
+    name: str = "Crucible"
+    logo_url: Optional[str] = None  # raw image URL; None/blank → text-only header
+
+
+@dataclass
 class RepoConfig:
     name: str
     provider: str
@@ -60,6 +66,7 @@ class Config:
     model: ModelConfig
     review: ReviewConfig
     agent: AgentConfig
+    branding: BrandingConfig
     repos: List[RepoConfig]
     exclude_paths: List[str]
     path: Path  # where config.yaml was loaded from (rules/ resolves relative to its parent)
@@ -164,12 +171,20 @@ def load_config(path) -> Config:
             )
         )
 
+    branding_raw = raw.get("branding", {}) or {}
+    logo_url = branding_raw.get("logo_url")
+    branding = BrandingConfig(
+        name=str(branding_raw.get("name", "Crucible")),
+        logo_url=(str(logo_url).strip() or None) if logo_url else None,
+    )
+
     exclude_paths = list(raw.get("exclude_paths", []) or [])
 
     return Config(
         model=model,
         review=review,
         agent=agent,
+        branding=branding,
         repos=repos,
         exclude_paths=exclude_paths,
         path=path,

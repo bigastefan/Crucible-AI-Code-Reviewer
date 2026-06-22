@@ -33,6 +33,20 @@ class SummaryMeta:
     duration_s: float = 0.0
     # (new, resolved, unchanged) vs the previous review; None on the first review.
     delta: Optional[Tuple[int, int, int]] = None
+    # Cosmetic branding of the header CONTENT (not the comment author).
+    name: str = "Crucible"
+    logo_url: Optional[str] = None
+
+
+def _title(meta: SummaryMeta, verdict_str: str) -> str:
+    """Branded h2 title. Graceful fallback: the logo carries alt text AND the name is
+    always present as words, so a broken image never leaves a nameless box."""
+    name = meta.name or "Crucible"
+    if meta.logo_url:
+        mark = f'<img src="{meta.logo_url}" width="16" align="top" alt="{name}"> '
+    else:
+        mark = "🔥 "
+    return f"## {mark}{name} Review — {verdict_str}"
 
 
 def verdict(findings: List[Finding], mode: str) -> Tuple[str, str]:
@@ -88,14 +102,14 @@ def build_header(review: ReviewResult, findings: List[Finding], meta: SummaryMet
     # Fail-open / unavailable: keep it minimal but honest.
     if review.error:
         return (
-            "### 🔥 Crucible — ⚠️ Review unavailable\n\n"
+            _title(meta, "⚠️ Review unavailable") + "\n\n"
             f"{_one_liner(review.summary)}\n\n"
             "_This is advisory only and did not block the merge._"
             + footer
         )
 
     v_emoji, v_text = verdict(findings, meta.mode)
-    lines: List[str] = [f"### 🔥 Crucible — {v_emoji} {v_text}", "", _one_liner(review.summary), ""]
+    lines: List[str] = [_title(meta, f"{v_emoji} {v_text}"), "", _one_liner(review.summary), ""]
 
     # Severity tally (sums to len(findings) — the invariant).
     if findings:

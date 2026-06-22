@@ -93,3 +93,25 @@ def test_error_header_is_unavailable_and_marked():
     header = summary.build_header(_review([], error="bad key"), [], _meta())
     assert "unavailable" in header.lower()
     assert dedup.text_has_summary_marker(header)
+
+
+# --- A1: branded identity (cosmetic, with graceful fallback) ------------------
+def test_branded_title_with_logo():
+    meta = summary.SummaryMeta(model="m", name="Crucible", logo_url="https://x/logo.png")
+    header = summary.build_header(_review(FINDINGS), FINDINGS, meta)
+    assert '<img src="https://x/logo.png"' in header
+    assert 'alt="Crucible"' in header        # graceful: alt renders if image 404s
+    assert "Crucible Review —" in header     # name is always present as text
+
+
+def test_text_fallback_without_logo():
+    meta = summary.SummaryMeta(model="m", logo_url=None)
+    header = summary.build_header(_review(FINDINGS), FINDINGS, meta)
+    assert "<img" not in header
+    assert "🔥 Crucible Review —" in header
+
+
+def test_counts_intact_with_branding():
+    meta = summary.SummaryMeta(model="m", logo_url="https://x/logo.png")
+    header = summary.build_header(_review(FINDINGS), FINDINGS, meta)
+    assert "**5 findings**" in header  # branding does not touch the code-computed tally

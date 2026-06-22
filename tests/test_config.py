@@ -112,3 +112,15 @@ def test_missing_model_default(tmp_path):
 def test_missing_file():
     with pytest.raises(ConfigError, match="not found"):
         load_config("/nope/does-not-exist.yaml")
+
+
+def test_branding_parsed_from_real_config():
+    cfg = load_config(CONFIG)
+    assert cfg.branding.name == "Crucible"
+    assert cfg.branding.logo_url and cfg.branding.logo_url.endswith("crucible-logo.png")
+
+
+def test_branding_defaults_when_absent(tmp_path):
+    body = "model:\n  default: x\nrepos:\n  - name: A\n    provider: azure\n    match: A\n    project_rules: a\n"
+    cfg = load_config(_write(tmp_path, body))
+    assert cfg.branding.name == "Crucible" and cfg.branding.logo_url is None

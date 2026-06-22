@@ -142,6 +142,7 @@ def post_review(
     meta = summary.SummaryMeta(
         mode=mode, model=model, duration_s=duration_s,
         delta=summary.compute_delta(existing_hashes, current_hashes),
+        name=cfg.branding.name, logo_url=cfg.branding.logo_url,
     )
     provider.upsert_summary(summary.build_header(review, sel.surfaced, meta))
 

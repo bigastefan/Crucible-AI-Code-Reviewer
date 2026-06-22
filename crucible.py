@@ -111,7 +111,8 @@ def run_engine(cfg: Config, repo: RepoConfig, diff_text: str) -> int:
     # Render the exact summary header that would be posted (no existing → no delta line).
     sel = poster.select_findings(result, files, cfg.review, set())
     mode = "blocking" if cfg.review.fail_check_on != "none" else "advisory"
-    meta = summary.SummaryMeta(mode=mode, model=cfg.model_for(repo), duration_s=duration)
+    meta = summary.SummaryMeta(mode=mode, model=cfg.model_for(repo), duration_s=duration,
+                              name=cfg.branding.name, logo_url=cfg.branding.logo_url)
     print("\n--- summary header (preview) ---")
     print(summary.build_header(result, sel.surfaced, meta))
 
@@ -158,7 +159,9 @@ def _unavailable_summary(cfg: Config, reason: str) -> str:
         error=reason,
     )
     mode = "blocking" if cfg.review.fail_check_on != "none" else "advisory"
-    return summary.build_header(result, [], summary.SummaryMeta(mode=mode, model=cfg.model.default))
+    meta = summary.SummaryMeta(mode=mode, model=cfg.model.default,
+                               name=cfg.branding.name, logo_url=cfg.branding.logo_url)
+    return summary.build_header(result, [], meta)
 
 
 def run_post(cfg: Config, repo: RepoConfig, provider_name: str, args) -> int:

@@ -20,6 +20,13 @@ agent:
   skip_draft_prs: true
   redact_secrets: true            # redact secrets BEFORE the LLM call; raise as Critical
 
+# Cosmetic branding of the summary header CONTENT (the bot author stays github-actions[bot]).
+branding:
+  name: "Crucible"
+  # Raw URL to the logo (~16px). Hosts resolve raw URLs differently, so this is config,
+  # not code. Leave blank to render the name with no image (graceful text fallback).
+  logo_url: "https://raw.githubusercontent.com/bigastefan/Crucible-AI-Code-Reviewer/main/docs/assets/crucible-logo.png"
+
 # Map each repo to its rule set + git host. Onboard a repo = add a block here +
 # create rules/projects/<project_rules>.md. No code change.
 # provider: azure | github
