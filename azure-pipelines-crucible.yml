@@ -1,0 +1,52 @@
+# Crucible — central EXTENDS template (Azure DevOps). Lives in the Crucible repo.
+# A repo onboards by committing a tiny stub that `extends` this template, pinned to a
+# release tag — see docs/ONBOARD_AZURE.md. Mirrors the GitHub reusable-workflow pattern (O1).
+#
+# Dual-checkout: the caller's PR (to diff) + the Crucible agent code (to run). Reuses
+# core/ + providers/azure.py unchanged. Advisory + fail-open come from the agent itself
+# (config fail_check_on: none + the top-level fail-open wrapper).
+parameters:
+  - name: repoName            # caller repo (for config match). Empty → agent uses
+    type: string             # Build.Repository.Name and falls back to global rules.
+    default: ''
+  - name: pythonVersion
+    type: string
+    default: '3.11'
+
+variables:
+  - group: crucible-secrets   # shared variable group → ANTHROPIC_API_KEY (one place, project-wide)
+
+stages:
+  - stage: crucible_review
+    displayName: Crucible review
+    jobs:
+      - job: review
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self          # the caller's PR — git diff runs here
+            fetchDepth: 0
+            path: caller
+          - checkout: crucible      # the Crucible agent (resource declared in the stub, pinned)
+            path: crucible
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '${{ parameters.pythonVersion }}'
+
+          - script: pip install -r $(Agent.BuildDirectory)/crucible/requirements.txt
+            displayName: Install Crucible deps
+
+          - script: |
+              python $(Agent.BuildDirectory)/crucible/crucible.py \
+                --config $(Agent.BuildDirectory)/crucible/config.yaml \
+                --pr $(System.PullRequest.PullRequestId) \
+                --repo "${{ parameters.repoName }}"
+            displayName: Run Crucible
+            workingDirectory: $(Agent.BuildDirectory)/caller   # so git diff sees the PR checkout
+            env:
+              # Build-service identity for posting comments. REQUIRES the Project Build
+              # Service to have "Contribute to pull requests" (see ONBOARD_AZURE.md gotcha).
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              # From the crucible-secrets variable group. On any error the agent fails open.
+              ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
