@@ -8,13 +8,16 @@ review → merge deterministic secret findings.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable, List, Optional, Tuple
 
 from core import llm, prompt_builder, reviewer, secrets
 from core.diff import ADDED, REMOVED, FileDiff, filter_excluded, parse_diff
-from core.models import OverallRisk, ReviewResult
+from core.models import Coverage, OverallRisk, ReviewResult
 
 log = logging.getLogger("crucible.engine")
+
+_TEST_PATH_RE = re.compile(r"(test|spec)", re.IGNORECASE)
 
 
 def _changed_line_count(files: List[FileDiff]) -> int:
@@ -27,6 +30,23 @@ def _changed_line_count(files: List[FileDiff]) -> int:
     return n
 
 
+def _tests_missing(files: List[FileDiff]) -> bool:
+    """Heuristic: added non-test source but touched no *test*/*spec* file."""
+    adds_source = any(f.added_line_numbers and not _TEST_PATH_RE.search(f.path) for f in files)
+    touches_test = any(_TEST_PATH_RE.search(f.path) for f in files)
+    return adds_source and not touches_test
+
+
+def _coverage(parsed: List[FileDiff], files: List[FileDiff], oversized: bool) -> Coverage:
+    return Coverage(
+        files_reviewed=len(files),
+        files_skipped=len(parsed) - len(files),
+        changed_lines=_changed_line_count(files),
+        tests_missing=_tests_missing(files),
+        oversized=oversized,
+    )
+
+
 def run_review(
     cfg, repo, diff_text: str, complete_fn: Optional[Callable] = None
 ) -> Tuple[ReviewResult, List[FileDiff]]:
@@ -34,7 +54,8 @@ def run_review(
     post-exclusion parse used for line-anchoring. Never raises for content reasons
     (reviewer fails safe); provider/LLM transport errors propagate to the fail-open
     wrapper in crucible.py."""
-    files = filter_excluded(parse_diff(diff_text), cfg.exclude_paths)
+    parsed = parse_diff(diff_text)
+    files = filter_excluded(parsed, cfg.exclude_paths)
     model = cfg.model_for(repo)
 
     # GP-06: nothing left to review after exclusions.
@@ -42,6 +63,7 @@ def run_review(
         return ReviewResult(
             summary="Nothing to review — no changed files after exclusions.",
             overall_risk=OverallRisk.LOW,
+            coverage=_coverage(parsed, files, oversized=False),
         ), files
 
     # 1) Secret redaction BEFORE the LLM call (host-neutral).
@@ -64,7 +86,8 @@ def run_review(
             "Crucible skipped the model review."
         )
         return ReviewResult(
-            summary=notice, overall_risk=OverallRisk.MEDIUM, findings=secret_findings
+            summary=notice, overall_risk=OverallRisk.MEDIUM, findings=secret_findings,
+            coverage=_coverage(parsed, files, oversized=True),
         ), files
 
     # 3) Review the (redacted) diff.
@@ -74,4 +97,5 @@ def run_review(
     # 4) Merge deterministic secret findings (critical) ahead of model findings.
     if secret_findings:
         result.findings = secret_findings + result.findings
+    result.coverage = _coverage(parsed, files, oversized=False)
     return result, files

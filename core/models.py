@@ -140,6 +140,17 @@ class Finding:
 
 
 @dataclass
+class Coverage:
+    """What the agent actually reviewed — for the summary header (computed in code)."""
+
+    files_reviewed: int = 0
+    files_skipped: int = 0  # excluded by exclude_paths
+    changed_lines: int = 0
+    tests_missing: bool = False  # added non-test source but touched no test/spec file
+    oversized: bool = False  # size guard tripped → model review skipped
+
+
+@dataclass
 class ReviewResult:
     """The validated output of one review run (the §10 contract, coerced)."""
 
@@ -149,6 +160,8 @@ class ReviewResult:
     # Set when the review could not be produced/parsed. Drives the "review
     # unavailable" note while keeping the run fail-open (never raises).
     error: Optional[str] = None
+    # Internal (not in the §10 JSON contract): coverage metadata for the header.
+    coverage: Optional[Coverage] = None
 
 
 @dataclass

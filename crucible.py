@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from core import engine, logging_setup, poster
+from core import engine, logging_setup, poster, summary
 from core.config import Config, ConfigError, RepoConfig, load_config, match_repo
 from core.models import OverallRisk, ReviewResult, review_as_dict
 from providers.base import get_provider
@@ -98,18 +98,26 @@ def acquire_diff(args, repo: RepoConfig, provider_name: str) -> str | None:
 
 
 def run_engine(cfg: Config, repo: RepoConfig, diff_text: str) -> int:
-    """Phase 2 dry-run: redact → guard → review → validated findings JSON. No posting."""
+    """Phase 2 dry-run: redact → guard → review → JSON + the summary header. No posting."""
     t0 = time.time()
     result, files = engine.run_review(cfg, repo, diff_text)
+    duration = time.time() - t0
     commentable = sum(len(f.added_line_numbers) for f in files)
     print(f"\nParsed {len(files)} file(s); {commentable} commentable line(s).")
 
     print("\n--- review (JSON, posts nothing) ---")
     print(json.dumps(review_as_dict(result), indent=2, ensure_ascii=False))
-    logging_setup.log_run(log, cfg.model_for(repo), time.time() - t0, note="(dry-run)")
+
+    # Render the exact summary header that would be posted (no existing → no delta line).
+    sel = poster.select_findings(result, files, cfg.review, set())
+    mode = "blocking" if cfg.review.fail_check_on != "none" else "advisory"
+    meta = summary.SummaryMeta(mode=mode, model=cfg.model_for(repo), duration_s=duration)
+    print("\n--- summary header (preview) ---")
+    print(summary.build_header(result, sel.surfaced, meta))
+
+    logging_setup.log_run(log, cfg.model_for(repo), duration, note="(dry-run)")
     if result.error:
-        print(f"\nNOTE: fail-open — review unavailable/unparsed ({result.error}). "
-              "In CI this would post a 'review unavailable' note and pass the check.")
+        print(f"\nNOTE: fail-open — review unavailable/unparsed ({result.error}).")
     return 0
 
 
@@ -145,12 +153,12 @@ def run(args) -> int:
 
 def _unavailable_summary(cfg: Config, reason: str) -> str:
     result = ReviewResult(
-        summary="Crucible review unavailable (an internal error occurred). This is "
-                "advisory only and did not block the merge.",
+        summary="Crucible review unavailable (an internal error occurred).",
         overall_risk=OverallRisk.MEDIUM,
         error=reason,
     )
-    return poster.render_summary(result, [], cfg.root)
+    mode = "blocking" if cfg.review.fail_check_on != "none" else "advisory"
+    return summary.build_header(result, [], summary.SummaryMeta(mode=mode, model=cfg.model.default))
 
 
 def run_post(cfg: Config, repo: RepoConfig, provider_name: str, args) -> int:
@@ -174,8 +182,10 @@ def run_post(cfg: Config, repo: RepoConfig, provider_name: str, args) -> int:
         t0 = time.time()
         diff_text = Path(args.diff_file).read_text() if args.diff_file else provider.get_diff()
         result, files = engine.run_review(cfg, repo, diff_text)
-        outcome = poster.post_review(provider, result, files, cfg)
-        logging_setup.log_run(log, cfg.model_for(repo), time.time() - t0, note=f"(posted={outcome.posted})")
+        duration = time.time() - t0
+        outcome = poster.post_review(provider, result, files, cfg,
+                                     model=cfg.model_for(repo), duration_s=duration)
+        logging_setup.log_run(log, cfg.model_for(repo), duration, note=f"(posted={outcome.posted})")
 
         s = outcome.stats
         print(
