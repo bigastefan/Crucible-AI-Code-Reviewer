@@ -146,11 +146,15 @@ class GitHubProvider(GitProvider):
             raise RuntimeError(f"git diff failed: {result.stderr.strip()}")
         return result.stdout
 
-    def existing_finding_hashes(self) -> Set[str]:
-        hashes: Set[str] = set()
+    def existing_findings(self):
+        pairs = []
         for c in self._paginated_get(self._repo_path(f"/pulls/{self.pr_number}/comments")):
-            hashes |= dedup.extract_finding_hashes(c.get("body", ""))
-        return hashes
+            for h in dedup.extract_finding_hashes(c.get("body", "")):
+                pairs.append((h, str(c.get("id"))))
+        return pairs
+
+    def delete_inline(self, ref: str) -> None:
+        self._request("DELETE", self._repo_path(f"/pulls/comments/{ref}"))
 
     def post_inline(self, finding: Finding) -> None:
         sha = self._head_sha or self.get_pr_context().head_sha

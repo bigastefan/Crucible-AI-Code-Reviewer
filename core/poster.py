@@ -37,6 +37,7 @@ class Selection:
 @dataclass
 class PostOutcome:
     posted: int = 0
+    resolved: int = 0  # stale comments deleted (findings no longer present)
     stats: SelectionStats = field(default_factory=SelectionStats)
     gate_failed: bool = False
     surfaced: List[Finding] = field(default_factory=list)
@@ -91,7 +92,7 @@ def select_findings(
             continue
         if path != f.file:
             f = Finding(path, f.line, f.severity, f.category, f.title, f.comment, f.suggestion)
-        f.dedup_hash = dedup.content_hash(path, f.category.value, content.get((path, f.line), f.title))
+        f.dedup_hash = dedup.content_hash(path, content.get((path, f.line), f.title))
         anchored.append(f)
 
     # Unique within the run (by content hash), highest severity first, then capped.
@@ -117,18 +118,30 @@ def select_findings(
 def post_review(
     provider, review: ReviewResult, files: List[FileDiff], cfg, model: str = "", duration_s: float = 0.0
 ) -> PostOutcome:
-    """Post new findings, upsert the single Tech-Lead header, compute the gate."""
-    existing = provider.existing_finding_hashes()
-    sel = select_findings(review, files, cfg.review, existing)
+    """Post new findings, resolve stale ones, upsert the single header, compute the gate."""
+    existing_pairs = provider.existing_findings()
+    existing_hashes = {h for h, _ in existing_pairs}
+    sel = select_findings(review, files, cfg.review, existing_hashes)
 
     for f in sel.to_post:
         provider.post_inline(f)
 
-    mode = "blocking" if cfg.review.fail_check_on != "none" else "advisory"
+    # B: resolve (delete) comments whose finding is no longer present this run, so the
+    # PR always shows exactly the current finding set — no accumulation across pushes.
     current_hashes = {f.dedup_hash for f in sel.surfaced}
+    resolved = 0
+    for h, ref in existing_pairs:
+        if h not in current_hashes:
+            try:
+                provider.delete_inline(ref)
+                resolved += 1
+            except Exception as e:  # best-effort; never break the run
+                log.warning("could not resolve stale comment %s: %s", ref, e)
+
+    mode = "blocking" if cfg.review.fail_check_on != "none" else "advisory"
     meta = summary.SummaryMeta(
         mode=mode, model=model, duration_s=duration_s,
-        delta=summary.compute_delta(existing, current_hashes),
+        delta=summary.compute_delta(existing_hashes, current_hashes),
     )
     provider.upsert_summary(summary.build_header(review, sel.surfaced, meta))
 
@@ -140,4 +153,5 @@ def post_review(
     state = "failed" if gate_failed else "succeeded"
     provider.set_status(state, "Crucible found a blocking issue." if gate_failed else "Crucible review complete.")
 
-    return PostOutcome(posted=len(sel.to_post), stats=sel.stats, gate_failed=gate_failed, surfaced=sel.surfaced)
+    return PostOutcome(posted=len(sel.to_post), resolved=resolved, stats=sel.stats,
+                       gate_failed=gate_failed, surfaced=sel.surfaced)

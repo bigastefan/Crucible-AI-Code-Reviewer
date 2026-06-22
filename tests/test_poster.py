@@ -14,16 +14,20 @@ FIX = ROOT / "tests" / "fixtures"
 
 class FakeProvider(GitProvider):
     def __init__(self, existing=None):
-        self.existing = set(existing or [])
+        self.existing_hashes = set(existing or [])  # hashes already on the PR
         self.posted = []
         self.summaries = []
         self.statuses = []
+        self.deleted = []
 
-    def existing_finding_hashes(self):
-        return set(self.existing)
+    def existing_findings(self):
+        return [(h, f"ref:{h}") for h in self.existing_hashes]
 
     def post_inline(self, finding):
         self.posted.append(finding)
+
+    def delete_inline(self, ref):
+        self.deleted.append(ref)
 
     def upsert_summary(self, markdown):
         self.summaries.append(markdown)
@@ -87,6 +91,16 @@ def test_dedup_holds_when_title_changes():
     assert sel.to_post == []  # title changed, content identical → no duplicate
 
 
+def test_dedup_holds_when_category_changes():
+    # Same anchored line, model relabeled the category → still deduped (A fix).
+    first = poster.select_findings(
+        _review([_finding(11, Severity.HIGH, "x", cat=Category.SECURITY)]), _files(), _cfg().review, set())
+    h = first.surfaced[0].dedup_hash
+    other = _review([_finding(11, Severity.HIGH, "x", cat=Category.MAINTAINABILITY)])
+    sel = poster.select_findings(other, _files(), _cfg().review, {h})
+    assert sel.to_post == []
+
+
 def test_cap_keeps_highest_severity():
     review = _review([
         _finding(2, Severity.LOW, "low"),
@@ -131,6 +145,18 @@ def test_gp09_second_push_posts_zero_duplicates():
     assert outcome.posted == 0
     assert p2.posted == []
     assert len(p2.summaries) == 1  # header still upserted (with a delta line)
+
+
+def test_resolves_stale_comments():
+    # B: a finding no longer present this run → its comment is deleted (no accumulation).
+    review = _review([_finding(11, Severity.HIGH, "keep")])
+    first = poster.select_findings(review, _files(), _cfg().review, set())
+    keep_hash = first.surfaced[0].dedup_hash
+    prov = FakeProvider(existing={keep_hash, "stalehash001"})
+    outcome = poster.post_review(prov, review, _files(), _cfg())
+    assert outcome.posted == 0          # "keep" already on the PR
+    assert outcome.resolved == 1
+    assert prov.deleted == ["ref:stalehash001"]   # stale deleted, "keep" retained
 
 
 def test_gate_advisory_never_fails():

@@ -56,14 +56,22 @@ def _finding():
     return Finding("src/calc.py", 12, Severity.HIGH, Category.BUG, "Null deref", "x may be None", "if x:")
 
 
-def test_existing_finding_hashes_extracted_from_threads():
+def test_existing_findings_extracted_with_refs():
     h = dedup.finding_hash(_finding())
     threads = {"value": [
-        {"id": 1, "comments": [{"id": 1, "content": f"body <!-- crucible:{h} -->"}]},
-        {"id": 2, "comments": [{"id": 1, "content": "a human comment, no marker"}]},
+        {"id": 7, "comments": [{"id": 9, "content": f"body <!-- crucible:{h} -->"}]},
+        {"id": 8, "comments": [{"id": 1, "content": "a human comment, no marker"}]},
     ]}
     prov = make(FakeSession(threads_payload=threads))
-    assert prov.existing_finding_hashes() == {h}
+    assert prov.existing_findings() == [(h, "7:9")]
+    assert prov.existing_finding_hashes() == {h}  # convenience derives the set
+
+
+def test_delete_inline_issues_delete():
+    sess = FakeSession()
+    make(sess).delete_inline("7:9")
+    call = sess.calls[-1]
+    assert call.method == "DELETE" and "/threads/7/comments/9?" in call.url
 
 
 def test_post_inline_payload_and_anchor():

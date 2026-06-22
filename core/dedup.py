@@ -26,14 +26,16 @@ def _normalize(text: str) -> str:
     return " ".join(str(text).lower().split())
 
 
-def content_hash(file: str, category: str, line_content: str) -> str:
-    """The canonical dedup hash: file | category | normalized anchored-line CODE.
+def content_hash(file: str, line_content: str) -> str:
+    """The canonical dedup hash: file | normalized anchored-line CODE.
 
-    Keyed on the changed line's CONTENT (not its number, not the LLM title) so it is
-    stable across both line drift and title rewording between runs — the property that
-    actually prevents duplicate comments on re-push (P1-01/GP-09). Once the dev edits
-    that line, the content (and hash) changes, which is correct: it's a new state."""
-    basis = f"{file}|{category}|{_normalize(line_content)}"
+    Keyed on the changed line's CONTENT — NOT its number, NOT the LLM title, and NOT the
+    category. This is the property that prevents duplicate comments on re-push
+    (P1-01/GP-09): stable across line drift, title rewording, AND category drift (the
+    model labelling the same issue 'security' one run and 'maintainability' the next).
+    Once the dev edits that line, the content (and hash) changes — correct, it's a new
+    state. Trade-off: two distinct findings on the SAME line collapse to one comment."""
+    basis = f"{file}|{_normalize(line_content)}"
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
 
@@ -42,7 +44,7 @@ def finding_hash(finding: Finding) -> str:
     to a title-based hash (kept only so callers without diff context still work)."""
     if finding.dedup_hash:
         return finding.dedup_hash
-    basis = f"{finding.file}|{finding.category.value}|{_normalize(finding.title)}"
+    basis = f"{finding.file}|{_normalize(finding.title)}"
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
 

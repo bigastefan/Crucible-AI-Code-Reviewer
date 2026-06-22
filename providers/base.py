@@ -10,7 +10,7 @@ Adapter bodies are NOT implemented in Phase 0:
 """
 from __future__ import annotations
 
-from typing import Optional, Set
+from typing import List, Optional, Set, Tuple
 
 from core.models import Finding, PRContext
 
@@ -32,13 +32,24 @@ class GitProvider:
         (refs/heads/main → main) and the git invocation. core/diff.py parses it."""
         raise NotImplementedError
 
-    def existing_finding_hashes(self) -> Set[str]:
-        """Hashes already posted on this PR, extracted from the hidden
-        <!-- crucible:{hash} --> markers — for de-dup across pushes."""
+    def existing_findings(self) -> List[Tuple[str, str]]:
+        """The Crucible inline findings already on this PR, as (hash, ref) pairs.
+        `hash` comes from the hidden <!-- crucible:{hash} --> marker; `ref` is an
+        adapter-specific handle passed back to delete_inline(). Used for de-dup AND
+        for resolving (deleting) findings that are no longer present."""
         raise NotImplementedError
+
+    def existing_finding_hashes(self) -> Set[str]:
+        """Convenience: just the hashes (derived from existing_findings)."""
+        return {h for h, _ in self.existing_findings()}
 
     def post_inline(self, finding: Finding) -> None:
         """Post one comment anchored to finding.file:finding.line (right side)."""
+        raise NotImplementedError
+
+    def delete_inline(self, ref: str) -> None:
+        """Delete a previously-posted inline comment by its ref (resolves a finding
+        that is no longer present on re-review). Best-effort — caller tolerates failure."""
         raise NotImplementedError
 
     def upsert_summary(self, markdown: str) -> None:

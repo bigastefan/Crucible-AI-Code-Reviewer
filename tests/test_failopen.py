@@ -35,8 +35,11 @@ class FakeProvider(GitProvider):
             raise RuntimeError("git diff exploded")
         return DIFF
 
-    def existing_finding_hashes(self):
-        return set()
+    def existing_findings(self):
+        return []
+
+    def delete_inline(self, ref):
+        pass
 
     def post_inline(self, finding):
         if self.raise_on_post:

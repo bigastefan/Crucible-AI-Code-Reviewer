@@ -80,8 +80,11 @@ class DraftProvider(GitProvider):
     def get_diff(self):
         raise AssertionError("draft PR must be skipped before diff acquisition")
 
-    def existing_finding_hashes(self):
-        return set()
+    def existing_findings(self):
+        return []
+
+    def delete_inline(self, ref):
+        pass
 
     def post_inline(self, finding):
         self.posted.append(finding)

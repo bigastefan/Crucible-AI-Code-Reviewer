@@ -145,12 +145,19 @@ class AzureProvider(GitProvider):
             raise RuntimeError(f"git diff failed: {result.stderr.strip()}")
         return result.stdout
 
-    def existing_finding_hashes(self) -> Set[str]:
-        hashes: Set[str] = set()
+    def existing_findings(self):
+        pairs = []
         for thread in self._get_threads():
+            tid = thread.get("id")
             for comment in thread.get("comments", []) or []:
-                hashes |= dedup.extract_finding_hashes(comment.get("content", ""))
-        return hashes
+                cid = comment.get("id")
+                for h in dedup.extract_finding_hashes(comment.get("content", "")):
+                    pairs.append((h, f"{tid}:{cid}"))
+        return pairs
+
+    def delete_inline(self, ref: str) -> None:
+        tid, cid = ref.split(":", 1)
+        self._request("DELETE", self._url(f"/threads/{tid}/comments/{cid}"))
 
     def post_inline(self, finding: Finding) -> None:
         body = {

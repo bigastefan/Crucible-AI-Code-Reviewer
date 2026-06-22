@@ -58,14 +58,22 @@ def _finding():
     return Finding("src/calc.ts", 12, Severity.HIGH, Category.BUG, "Null deref", "x may be None", "if (x) {}")
 
 
-def test_existing_finding_hashes_from_review_comments():
+def test_existing_findings_from_review_comments():
     h = dedup.finding_hash(_finding())
     comments = [
-        {"id": 1, "body": f"old finding <!-- crucible:{h} -->"},
-        {"id": 2, "body": "a human review comment"},
+        {"id": 11, "body": f"old finding <!-- crucible:{h} -->"},
+        {"id": 12, "body": "a human review comment"},
     ]
     prov = make(FakeSession(pull_comments=comments))
-    assert prov.existing_finding_hashes() == {h}
+    assert prov.existing_findings() == [(h, "11")]
+    assert prov.existing_finding_hashes() == {h}  # convenience derives the set
+
+
+def test_delete_inline_issues_delete():
+    sess = FakeSession()
+    make(sess).delete_inline("11")
+    call = sess.calls[-1]
+    assert call.method == "DELETE" and call.url.endswith("/repos/bigastefan/test/pulls/comments/11")
 
 
 def test_post_inline_payload_side_right_and_anchor():
