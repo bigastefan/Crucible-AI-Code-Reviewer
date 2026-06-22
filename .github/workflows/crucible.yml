@@ -1,45 +1,20 @@
-# Crucible self-review (smoke test). Reviews PRs opened against THIS repo.
-# Golden-PR / adapter testing happens on a SEPARATE PRIVATE repo — see
-# docs/CRUCIBLE_GITHUB_RUNBOOK.md (which has the dual-checkout workflow for that repo).
+# Crucible self-review (the source repo reviewing its own PRs).
+# Calls the reusable workflow LOCALLY, pinning the agent to the PR's own head sha so
+# self-review exercises the in-progress code. Other repos onboard with the pinned-@v1
+# stub instead — see docs/ONBOARD_GITHUB.md.
 name: Crucible review
 
-# SECRET SAFETY (non-negotiable): use pull_request, NEVER pull_request_target.
-# pull_request_target runs with repo secrets in scope on fork PRs — the classic leak vector.
 on:
-  pull_request:
+  pull_request:                     # never pull_request_target
     types: [opened, synchronize, reopened]
 
-# Least privilege — nothing beyond posting PR comments + reading the code.
 permissions:
   pull-requests: write
   contents: read
 
-# One in-flight run per PR; a new push cancels the previous (avoids racing comments).
-concurrency:
-  group: crucible-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # the diff needs origin/<base>
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - run: pip install -r requirements.txt
-
-      - name: Run Crucible
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          # Secret reference ONLY — never hard-code/echo/print the key. On fork PRs of a
-          # public repo this is empty; Crucible then fails open (posts "review unavailable",
-          # exits success) rather than erroring.
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          python crucible.py --pr "${{ github.event.pull_request.number }}" \
-                             --repo "${{ github.repository }}"
+    uses: ./.github/workflows/crucible-reusable.yml
+    with:
+      crucible_ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit

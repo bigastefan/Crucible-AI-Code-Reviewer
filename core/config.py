@@ -191,6 +191,12 @@ def load_config(path) -> Config:
     )
 
 
+def default_repo(name: str, provider: str) -> RepoConfig:
+    """Fallback config for a repo NOT listed in config.yaml (minimal onboarding, O1):
+    review with global rules only (no project/language rules)."""
+    return RepoConfig(name=name, provider=provider, match=name, project_rules="", language_rules=[])
+
+
 def match_repo(config: Config, repo_name: str) -> Optional[RepoConfig]:
     """Resolve a repo name to its config block.
 

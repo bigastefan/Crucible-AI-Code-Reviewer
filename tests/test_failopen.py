@@ -11,6 +11,7 @@ import pytest
 import crucible
 from core import llm
 from core.config import load_config, match_repo
+from core.models import PRContext
 from providers.base import GitProvider
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +30,9 @@ class FakeProvider(GitProvider):
         self.summaries = []
         self.statuses = []
         self.posted = []
+
+    def get_pr_context(self):
+        return PRContext(repo="x", pr_id=1, is_draft=False)
 
     def get_diff(self):
         if self.raise_on_diff:
@@ -107,10 +111,24 @@ def test_failopen_when_provider_construction_raises(monkeypatch):
     assert rc == 0
 
 
-def test_unmatched_repo_failopen_on_posting_path():
-    # Non-dry-run + unmatched repo must exit 0 (a missing config entry can't block merges).
+def test_unmatched_repo_failopen_when_no_provider(monkeypatch):
+    # Unmatched + no detectable provider → fail open (exit 0), nothing reviewed.
+    monkeypatch.setattr(crucible, "detect_provider", lambda: None)
     rc = crucible.main(["--pr", "1", "--repo", "no-such-repo-xyz"])
     assert rc == 0
+
+
+def test_unmatched_repo_reviews_with_default_rules(monkeypatch):
+    # O1: unmatched + provider detected → review with default (global) rules, not skip.
+    monkeypatch.setattr(crucible, "detect_provider", lambda: "github")
+    monkeypatch.setattr(llm, "complete", lambda *a, **k: VALID)
+    prov = FakeProvider()
+    monkeypatch.setattr(crucible, "get_provider", lambda *a, **k: prov)
+    rc = crucible.main(["--pr", "1", "--repo", "bigastefan/brand-new-repo"])
+    assert rc == 0
+    assert prov.summaries  # it reviewed (posted a header) rather than skipping
+    assert "Crucible Review" in prov.summaries[-1]
+    assert "unavailable" not in prov.summaries[-1].lower()  # a real review, not fail-open
 
 
 def test_unmatched_repo_returns_2_in_dry_run():

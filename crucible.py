@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from core import engine, logging_setup, poster, summary
-from core.config import Config, ConfigError, RepoConfig, load_config, match_repo
+from core.config import Config, ConfigError, RepoConfig, default_repo, load_config, match_repo
 from core.models import OverallRisk, ReviewResult, review_as_dict
 from providers.base import get_provider
 
@@ -34,6 +34,15 @@ def detect_repo_name() -> str | None:
         or os.environ.get("GITHUB_REPOSITORY")  # GitHub (owner/repo)
         or None
     )
+
+
+def detect_provider() -> str | None:
+    """Infer the git host from CI env vars (for repos not listed in config.yaml)."""
+    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("GITHUB_REPOSITORY"):
+        return "github"
+    if os.environ.get("SYSTEM_ACCESSTOKEN") or os.environ.get("TF_BUILD") or os.environ.get("BUILD_REPOSITORY_NAME"):
+        return "azure"
+    return None
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -133,10 +142,15 @@ def run(args) -> int:
             print(f"ERROR: no repo in config matches {repo_name!r}", file=sys.stderr)
             print(f"  configured: {[r.name for r in cfg.repos]}", file=sys.stderr)
             return 2
-        # Posting path: a missing config entry must NOT block a merge (fail-open).
-        log.warning("no repo matches %r; failing open (nothing to review)", repo_name)
-        print(f"\nFAIL-OPEN: no repo in config matches {repo_name!r}; nothing to review, exiting success.")
-        return 0
+        # Posting path (O1): a repo not in config falls back to DEFAULT (global) rules,
+        # so the minimal onboarding is just the stub workflow — no config edit needed.
+        provider = args.provider or detect_provider()
+        if provider is None:
+            log.warning("no repo match and no provider detected; failing open")
+            print(f"\nFAIL-OPEN: {repo_name!r} not in config and no provider detected; nothing reviewed.")
+            return 0
+        repo = default_repo(repo_name, provider)
+        print(f"NOTE: {repo_name!r} not in config — reviewing with default (global) rules.")
 
     print_resolution(cfg, repo, repo_name, fallback, args)
     provider_name = args.provider or repo.provider

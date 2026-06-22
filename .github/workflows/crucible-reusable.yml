@@ -1,0 +1,61 @@
+# Reusable Crucible review workflow. A repo onboards by calling this from a tiny stub
+# (see docs/ONBOARD_GITHUB.md) — no agent code or config needed in the caller repo.
+#
+# Dual-checkout: the CALLER's PR (to diff) + the Crucible agent from the source repo
+# (to run). Reuses core/ + providers/github.py unchanged. The caller's pull_request
+# context (PR number, repo, base ref) flows through to the agent automatically.
+name: Crucible (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        default: "3.11"
+      crucible_ref:
+        description: "Which version of the Crucible agent to run (tag/branch/sha)."
+        type: string
+        default: "v1"
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: crucible-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout caller PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # the diff needs origin/<base>
+
+      - name: Checkout Crucible agent
+        uses: actions/checkout@v4
+        with:
+          repository: bigastefan/Crucible-AI-Code-Reviewer
+          ref: ${{ inputs.crucible_ref }}
+          path: _crucible
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - run: pip install -r _crucible/requirements.txt
+
+      - name: Run Crucible
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # On a fork PR (public caller) this is empty → the agent fails open.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python _crucible/crucible.py \
+            --config _crucible/config.yaml \
+            --pr "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}"

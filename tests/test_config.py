@@ -124,3 +124,16 @@ def test_branding_defaults_when_absent(tmp_path):
     body = "model:\n  default: x\nrepos:\n  - name: A\n    provider: azure\n    match: A\n    project_rules: a\n"
     cfg = load_config(_write(tmp_path, body))
     assert cfg.branding.name == "Crucible" and cfg.branding.logo_url is None
+
+
+def test_default_repo_uses_global_rules_only():
+    # O1: a repo not in config falls back to global rules (minimal stub onboarding).
+    from core.config import default_repo
+    from core.prompt_builder import load_rules
+
+    cfg = load_config(CONFIG)
+    repo = default_repo("some-org/brand-new", "github")
+    assert repo.provider == "github" and repo.project_rules == "" and repo.language_rules == []
+    g, p, l = load_rules(cfg, repo)
+    assert "hard-coded secret" in g  # global rules apply
+    assert p == "(none)" and l == "(none)"
